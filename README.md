@@ -1,32 +1,8 @@
-This is the community repository for the Spartan Protocol AMM
+This is the community repository for work on generic AMM smart contract templates open for all to fork and experiment with.
 
 ### General repository info:
 
-There are three main branches for this repo:
-
-- `development` ongoing development branches are merged into this
-- `testnet` this represents the state of current contracts on testnet
-- `mainnet` this represents the state of current contracts on mainnet
-
-##### development:
-
-[Click here to jump to the `development` branch.](https://github.com/spartan-protocol/spartan-contracts/tree/development)
-Contributors should work off a fork/duplicate of the `development` branch and make a merge request from their forked branch to `development` when suitable
-
-##### testnet:
-
-[Click here to jump to the `testnet` branch.](https://github.com/spartan-protocol/spartan-contracts/tree/testnet)
-Contributors deploying to testnet and performing testing in that environment should only request a merge request to `testnet` once consensus is that their testnet deploy is the most current one in use by the community.
-
-Take note in advance of the latest commit hash of the branch you deployed to testnet (or ideally just make a fork/branch clearly named something like `testnet-deploy-004` or something and/or a GitHub issue with suitable identifiers)
-
-##### mainnet:
-
-[Click here to jump to the `mainnet` branch.](https://github.com/spartan-protocol/spartan-contracts/tree/mainnet)
-
-Contributors deploying to mainnet and performing live testing should only request a merge request to `mainnet` once consensus is that their mainnet deploy is the most current one in use by the community.
-
-Take note in advance of the latest commit hash of the branch you deployed to mainnet (or ideally just make a fork/branch clearly named something like `mainnet-deploy-004` or something and/or a GitHub issue with suitable identifiers)
+This repo is not being developed with the intention of deployment and handling of real funds/users in prod, its just an open resource for anyone to experiment with and build from.
 
 ### Running locally:
 
