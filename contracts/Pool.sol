@@ -1,371 +1,301 @@
-//SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
-import "./bsc-library/interfaces/iBEP20.sol";
-import "./interfaces/iHandler.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+// Interfaces
+import "./interfaces/iHandler.sol"; // TODO: Remove this *if we remove iTools*
+import "./interfaces/iSPARTA.sol";
+import "./interfaces/iTools.sol"; // TODO: Consider moving this inside pool contract if we want it immutable
+// Libraries | Contracts
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract Pool is iBEP20 {
-    using SafeMath for uint256;
+//// TODO: Decide whether we want public burn() & burnFor() functions (probably not?)
+//// Gas Increase if included: +0.127KiB (small impact)
+// import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
-    uint public constant minLiquidity = 10 ** 3;
-    bytes4 private constant _tsfSelector =
-        bytes4(keccak256(bytes("transfer(address,uint256)")));
+//// TODO: Decide whether we want to allow for permit functionality
+//// Gas Increase if included: +5.8KiB (massive impact)
+// import "@openzeppelin/contracts/token/ERC20/extensions/draft-ERC20Permit.sol";
 
-    string private _name;
-    string private _symbol;
-    uint128 private _asset1Depth;
-    uint128 private _asset2Depth;
+contract Pool is ERC20, ReentrancyGuard {
+    // Overrides
+    using SafeERC20 for IERC20;
 
-    uint8 public override decimals;
-    uint256 public genesis;
-    uint256 public override totalSupply;
-    address public asset1Addr; // Settlement Asset
-    address public asset2Addr; // Paired Token
+    // Constants
     address public immutable factoryAddr;
-    mapping(address => uint) private _balances;
-    mapping(address => mapping(address => uint)) private _allowances;
+    address public immutable protocolTokenAddr; // TODO: Remove this *if we remove iTools* (but keep in mind we need a burn address still)
+    address public immutable asset1Addr;
+    address public immutable asset2Addr;
+    uint256 public immutable genesis;
 
-    constructor() {
+    // Variables
+    uint256 private _asset1Depth; // Doesnt need to be public as we have getReserves() getter
+    uint256 private _asset2Depth; // Doesnt need to be public as we have getReserves() getter
+
+    // Mappings
+
+    // Events
+    event Mint(address indexed sender, uint amount0, uint amount1);
+    event Burn(
+        address indexed sender,
+        uint amount0,
+        uint amount1,
+        uint liquidity
+    );
+    event Swap(
+        address indexed inputToken,
+        address indexed outputToken,
+        uint256 inputAmount,
+        uint256 outputAmount,
+        uint256 swapFee
+    );
+
+    // Constructor
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        address newProtocolTokenAddr, // TODO: Remove this *if we remove iTools*
+        address newToken1Addr,
+        address newToken2Addr
+    ) ERC20(name_, symbol_) {
         factoryAddr = msg.sender;
-    }
-
-    // called once by the factory at time of deployment
-    function initialize(address newToken1Addr, address newToken2Addr) external {
-        require(msg.sender == factoryAddr, "SPARTANPROTOCOL: FORBIDDEN"); // sufficient check
+        protocolTokenAddr = newProtocolTokenAddr;
         asset1Addr = newToken1Addr;
         asset2Addr = newToken2Addr;
-        string memory poolFront = string(
-            abi.encodePacked(
-                iBEP20(newToken1Addr).symbol(),
-                ":",
-                iBEP20(newToken2Addr).symbol()
-            )
-        );
-        _name = string(abi.encodePacked(poolFront, "-SpartanProtocolPool"));
-        _symbol = string(abi.encodePacked(poolFront, "-SPP"));
-        decimals = 18;
         genesis = block.timestamp;
     }
 
-    //========================================IBEP20=========================================//
-
-    /**
-     * @dev Returns the token symbol.
-     */
-    function symbol() external view returns (string memory) {
-        return _symbol;
-    }
-
-    /**
-     * @dev Returns the DEPLOYER.
-     */
-    function getOwner() public view returns (address) {
-        return factoryAddr;
-    }
-
-    /**
-     * @dev Returns the token name.
-     */
-    function name() external view returns (string memory) {
-        return _name;
-    }
-
-    /**
-     * @dev See {BEP20-balanceOf}.
-     */
-    function balanceOf(address account) external view returns (uint256) {
-        return _balances[account];
-    }
-
-    /**
-     * @dev See {BEP20-transfer}.
-     *
-     * Requirements:
-     *
-     * - `recipient` cannot be the zero address.
-     * - the caller must have a balance of at least `amount`.
-     */
-    function transfer(
-        address recipient,
-        uint256 amount
-    ) external returns (bool) {
-        _transfer(msg.sender, recipient, amount);
-        return true;
-    }
-
-    /**
-     * @dev See {BEP20-allowance}.
-     */
-    function allowance(
-        address owner,
-        address spender
-    ) external view returns (uint256) {
-        return _allowances[owner][spender];
-    }
-
-    /**
-     * @dev See {BEP20-approve}.
-     *
-     * Requirements:
-     *
-     * - `spender` cannot be the zero address.
-     */
-    function approve(address spender, uint256 amount) external returns (bool) {
-        _approve(msg.sender, spender, amount);
-        return true;
-    }
-
-    /**
-     * @dev See {BEP20-transferFrom}.
-     *
-     * Emits an {Approval} event indicating the updated allowance. This is not
-     * required by the EIP. See the note at the beginning of {BEP20};
-     *
-     * Requirements:
-     * - `sender` and `recipient` cannot be the zero address.
-     * - `sender` must have a balance of at least `amount`.
-     * - the caller must have allowance for `sender`'s tokens of at least
-     * `amount`.
-     */
-    function transferFrom(
-        address sender,
-        address recipient,
-        uint256 amount
-    ) external returns (bool) {
-        _transfer(sender, recipient, amount);
-        _approve(
-            sender,
-            msg.sender,
-            _allowances[sender][msg.sender].sub(
-                amount,
-                "BEP20: transfer amount exceeds allowance"
-            )
-        );
-        return true;
-    }
-
-    /**
-     * @dev Atomically increases the allowance granted to `spender` by the caller.
-     *
-     * This is an alternative to {approve} that can be used as a mitigation for
-     * problems described in {BEP20-approve}.
-     *
-     * Emits an {Approval} event indicating the updated allowance.
-     *
-     * Requirements:
-     *
-     * - `spender` cannot be the zero address.
-     */
-    function increaseAllowance(
-        address spender,
-        uint256 addedValue
-    ) public returns (bool) {
-        _approve(
-            msg.sender,
-            spender,
-            _allowances[msg.sender][spender].add(addedValue)
-        );
-        return true;
-    }
-
-    /**
-     * @dev Atomically decreases the allowance granted to `spender` by the caller.
-     *
-     * This is an alternative to {approve} that can be used as a mitigation for
-     * problems described in {BEP20-approve}.
-     *
-     * Emits an {Approval} event indicating the updated allowance.
-     *
-     * Requirements:
-     *
-     * - `spender` cannot be the zero address.
-     * - `spender` must have allowance for the caller of at least
-     * `subtractedValue`.
-     */
-    function decreaseAllowance(
-        address spender,
-        uint256 subtractedValue
-    ) public returns (bool) {
-        _approve(
-            msg.sender,
-            spender,
-            _allowances[msg.sender][spender].sub(
-                subtractedValue,
-                "BEP20: decreased allowance below zero"
-            )
-        );
-        return true;
-    }
-
-    /**
-     * @dev Moves tokens `amount` from `sender` to `recipient`.
-     *
-     * This is internal function is equivalent to {transfer}, and can be used to
-     * e.g. implement automatic token fees, slashing mechanisms, etc.
-     *
-     * Emits a {Transfer} event.
-     *
-     * Requirements:
-     *
-     * - `sender` cannot be the zero address.
-     * - `recipient` cannot be the zero address.
-     * - `sender` must have a balance of at least `amount`.
-     */
-    function _transfer(
-        address sender,
-        address recipient,
-        uint256 amount
-    ) internal {
-        require(sender != address(0), "BEP20: transfer from the zero address");
-        require(recipient != address(0), "BEP20: transfer to the zero address");
-
-        _balances[sender] = _balances[sender].sub(
-            amount,
-            "BEP20: transfer amount exceeds balance"
-        );
-        _balances[recipient] = _balances[recipient].add(amount);
-        emit Transfer(sender, recipient, amount);
-    }
-
-    /** @dev Creates `amount` tokens and assigns them to `account`, increasing
-     * the total supply.
-     *
-     * Emits a {Transfer} event with `from` set to the zero address.
-     *
-     * Requirements
-     *
-     * - `to` cannot be the zero address.
-     */
-    function _mint(address account, uint256 amount) internal {
-        require(account != address(0), "BEP20: mint to the zero address");
-
-        totalSupply = totalSupply.add(amount);
-        _balances[account] = _balances[account].add(amount);
-        emit Transfer(address(0), account, amount);
-    }
-
-    /**
-     * @dev Destroys `amount` tokens from `account`, reducing the
-     * total supply.
-     *
-     * Emits a {Transfer} event with `to` set to the zero address.
-     *
-     * Requirements
-     *
-     * - `account` cannot be the zero address.
-     * - `account` must have at least `amount` tokens.
-     */
-    function _burn(address account, uint256 amount) internal {
-        require(account != address(0), "BEP20: burn from the zero address");
-
-        _balances[account] = _balances[account].sub(
-            amount,
-            "BEP20: burn amount exceeds balance"
-        );
-        totalSupply = totalSupply.sub(amount);
-        emit Transfer(account, address(0), amount);
-    }
-
-    // Burn supply
-    function burn(uint256 amount) public virtual override {
-        _burn(msg.sender, amount);
-    }
-
-    /**
-     * @dev Sets `amount` as the allowance of `spender` over the `owner`s tokens.
-     *
-     * This is internal function is equivalent to `approve`, and can be used to
-     * e.g. set automatic allowances for certain subsystems, etc.
-     *
-     * Emits an {Approval} event.
-     *
-     * Requirements:
-     *
-     * - `owner` cannot be the zero address.
-     * - `spender` cannot be the zero address.
-     */
-    function _approve(address owner, address spender, uint256 amount) internal {
-        require(owner != address(0), "BEP20: approve from the zero address");
-        require(spender != address(0), "BEP20: approve to the zero address");
-
-        _allowances[owner][spender] = amount;
-        emit Approval(owner, spender, amount);
-    }
-
-    /**
-     * @dev Destroys `amount` tokens from `account`.`amount` is then deducted
-     * from the caller's allowance.
-     *
-     * See {_burn} and {_approve}.
-     */
-    function _burnFrom(address account, uint256 amount) internal {
-        _burn(account, amount);
-        _approve(
-            account,
-            msg.sender,
-            _allowances[account][msg.sender].sub(
-                amount,
-                "BEP20: burn amount exceeds allowance"
-            )
-        );
-    }
-
-    //====================================POOL FUNCTIONS =================================//
-
-    function add() external returns (uint256) {
-        //  uint256 _actualAsset1Input = _checkAsset1Received(); // Get the received asset1 amount
-        //  uint256 _actualAsset2Input = _checkAsset2Received(); // Get the received asset2 amount
-    }
-
-    function remove() external returns (bool) {}
-
-    function swap() external returns (uint) {}
-
-    //=======================================INTERNAL LOGIC======================================//
-
-    // Check the asset1 amount received by this Pool
-    function _checkAsset1Received() internal view returns (uint256 _received) {
-        uint currentBalance = iBEP20(asset1Addr).balanceOf(address(this));
-        if (currentBalance > _asset1Depth) {
-            _received = currentBalance - _asset1Depth;
-        } else {
-            _received = 0;
-        }
-        return _received;
-    }
-
-    // Check the asset2 amount received by this Pool
-    function _checkAsset2Received() internal view returns (uint256 _received) {
-        uint currentBalance = iBEP20(asset2Addr).balanceOf(address(this));
-        if (currentBalance > _asset2Depth) {
-            _received = currentBalance - _asset2Depth;
-        } else {
-            _received = 0;
-        }
-        return _received;
+    // Read Functions
+    function _Handler() internal view returns (iHandler) {
+        // TODO: Remove this function *if we remove iTools*
+        return iSPARTA(protocolTokenAddr).handlerAddr(); // Get the Handler address reported by the protocol token's contract
     }
 
     function getReserves()
         public
         view
-        returns (
-            uint256 asset1Depth,
-            uint256 asset2Depth,
-            uint256 _blockTimestampLast
-        )
+        returns (uint256 asset1Depth, uint256 asset2Depth)
     {
         asset1Depth = _asset1Depth;
         asset2Depth = _asset2Depth;
-        _blockTimestampLast = block.timestamp;
     }
 
-    function _safeTransfer(address token, address to, uint value) private {
-        (bool success, bytes memory data) = token.call(
-            abi.encodeWithSelector(_tsfSelector, to, value)
-        );
+    // Write Functions
+    function add() external returns (uint256) {
+        //  uint256 _actualAsset1Input = _checkAsset1Received(); // Get the received asset1 amount
+        //  uint256 _actualAsset2Input = _checkAsset2Received(); // Get the received asset2 amount
+    }
+
+    // Contract adds liquidity for user
+    function addForMember(
+        address to
+    ) external nonReentrant returns (uint liquidity) {
+        uint current1Balance = IERC20(asset1Addr).balanceOf(address(this));
+        uint current2Balance = IERC20(asset2Addr).balanceOf(address(this));
+        // TODO: Decide whether to cache _asset1Depth && _asset2Depth
+        uint256 inputAsset1 = current1Balance - _asset1Depth;
+        uint256 inputAsset2 = current2Balance - _asset2Depth;
+
+        require(inputAsset1 > 0 && inputAsset2 > 0, "Input missing");
+
+        uint _totalSupply = totalSupply();
+        if (_totalSupply == 0) {
+            uint burnLiq = 1 ether; // Burn/lock portion (0.0001%)
+            liquidity = 9999 ether; // Pool creator's portion (99.9999%)
+            _mint(protocolTokenAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
+        } else {
+            // TODO: Consider moving the Tools math into this contract if we want it trustless/immutable
+            liquidity = iTools(_Handler().toolsAddr()).calcLiquidityUnits(
+                inputAsset1,
+                _asset1Depth,
+                inputAsset2,
+                _asset2Depth,
+                _totalSupply
+            ); // Calculate liquidity tokens to mint
+        }
+
+        require(liquidity > 0, "LiqAdd too small");
+
+        _mint(to, liquidity);
+
+        _asset1Depth = current1Balance; // update reserves
+        _asset2Depth = current2Balance; // update reserves
+
+        emit Mint(msg.sender, inputAsset1, inputAsset2);
+    }
+
+    // Contract adds liquidity for user
+    function addForMemberNewTest(
+        address to
+    ) external nonReentrant returns (uint liquidity) {
+        uint current1Balance = IERC20(asset1Addr).balanceOf(address(this));
+        uint current2Balance = IERC20(asset2Addr).balanceOf(address(this));
+        // TODO: Decide whether to cache _asset1Depth && _asset2Depth
+        uint256 inputAsset1 = current1Balance - _asset1Depth;
+        uint256 inputAsset2 = current2Balance - _asset2Depth;
+
+        require(inputAsset1 > 0 || inputAsset2 > 0, "Input missing");
+
+        uint _totalSupply = totalSupply();
+        if (_totalSupply == 0) {
+            uint burnLiq = 1 ether; // Burn/lock portion (0.0001%)
+            liquidity = 9999 ether; // Pool creator's portion (99.9999%)
+            _mint(protocolTokenAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
+        } else {
+            // TODO: Consider moving the Tools math into this contract if we want it trustless/immutable
+            liquidity = iTools(_Handler().toolsAddr())
+                .calcLiquidityUnitsNewTest(
+                    inputAsset1,
+                    _asset1Depth,
+                    inputAsset2,
+                    _asset2Depth,
+                    _totalSupply
+                ); // Calculate liquidity tokens to mint
+        }
+
+        require(liquidity > 0, "LiqAdd too small");
+
+        _mint(to, liquidity);
+
+        _asset1Depth = current1Balance; // update reserves
+        _asset2Depth = current2Balance; // update reserves
+
+        emit Mint(msg.sender, inputAsset1, inputAsset2);
+    }
+
+    // Contract removes liquidity for user
+    function removeLiquidity(
+        uint liquidity
+    ) external nonReentrant returns (uint asset1Amount, uint asset2Amount) {
+        require(liquidity > 0, "Input LP units must be > 0");
+        uint totalLiquidity = totalSupply();
+        require(totalLiquidity > liquidity, "Not enough liquidity available");
+        uint asset1Bal = IERC20(asset1Addr).balanceOf(address(this));
+        uint asset2Bal = IERC20(asset2Addr).balanceOf(address(this));
+        uint256 liquidityPercentage = (liquidity * (1 ether)) /
+            (totalLiquidity);
+        asset1Amount = (asset1Bal * (liquidityPercentage)) / (1 ether);
+        asset2Amount = (asset2Bal * (liquidityPercentage)) / (1 ether);
         require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "Pancake: TRANSFER_FAILED"
+            asset1Amount > 0 && asset2Amount > 0,
+            "Insufficient assets withdrawn"
         );
+        _burn(msg.sender, liquidity);
+        unchecked {
+            IERC20(asset1Addr).safeTransfer(msg.sender, asset1Amount);
+            IERC20(asset2Addr).safeTransfer(msg.sender, asset2Amount);
+        }
+        _sync();
+        emit Burn(msg.sender, asset1Amount, asset2Amount, liquidity);
+    }
+
+    function swapToken() external nonReentrant returns (uint256 outputAmount) {
+        address _asset1Addr = asset1Addr;
+        address _asset2Addr = asset2Addr;
+        uint256 asset1Depth = _asset1Depth;
+        uint256 asset2Depth = _asset2Depth;
+        require(asset1Depth > 0 && asset2Depth > 0, "Insufficient liquidity");
+
+        uint256 asset1TokenBal = IERC20(_asset1Addr).balanceOf(address(this));
+        uint256 asset2TokenBal = IERC20(_asset2Addr).balanceOf(address(this));
+
+        uint256 asset1Input = asset1TokenBal - asset1Depth;
+        uint256 asset2Input = asset2TokenBal - asset2Depth;
+        require(
+            !(asset1Input > 0 && asset2Input > 0),
+            "Two input assets detected"
+        ); // TODO: Decide if we want to allow this (LPs absorb the mistake)
+        uint256 swapFee;
+
+        if (asset1Input > 0) {
+            outputAmount = _performSwap(
+                asset1Input,
+                asset1Depth,
+                asset2Depth,
+                asset2Addr
+            );
+            swapFee = _getSwapFee(asset1Input, asset1Depth, asset2Depth);
+        } else {
+            outputAmount = _performSwap(
+                asset2Input,
+                asset2Depth,
+                asset1Depth,
+                asset1Addr
+            );
+            swapFee = _getSwapFee(asset2Input, asset2Depth, asset1Depth);
+        }
+
+        _sync();
+        emit Swap(
+            asset1Input > 0 ? asset1Addr : asset2Addr,
+            asset1Input > 0 ? asset2Addr : asset1Addr,
+            asset1Input > 0 ? asset1Input : asset2Input,
+            outputAmount,
+            swapFee
+        );
+    }
+
+    function _performSwap(
+        uint256 inputAmount,
+        uint256 inputDepth,
+        uint256 outputDepth,
+        address toAsset
+    ) internal returns (uint256) {
+        uint256 outputAmount = _getSwapOutput(
+            inputAmount,
+            inputDepth,
+            outputDepth
+        );
+        require(outputAmount > 0, "Swap too small");
+        unchecked {
+            IERC20(toAsset).safeTransfer(msg.sender, outputAmount);
+        }
+        return outputAmount;
+    }
+
+    function _squared(uint256 x) internal pure returns (uint256) {
+        // --- Readable Version ---
+        //// return x ** 2;
+
+        // --- Gas efficient version ---
+        return x * x;
+    }
+
+    function _getSwapOutput(
+        uint256 inputAmount,
+        uint256 inputDepth,
+        uint256 outputDepth
+    ) internal pure returns (uint256) {
+        // --- Readable Version ---
+        //// uint256 numerator = inputAmount * inputDepth * outputDepth;
+        //// uint256 denominator = _squared(inputAmount + inputDepth);
+        //// return numerator / denominator;
+
+        // --- Gas efficient version ---
+        return
+            (inputAmount * inputDepth * outputDepth) /
+            (_squared(inputAmount + inputDepth));
+    }
+
+    function _getSwapFee(
+        uint256 inputAmount,
+        uint256 inputDepth,
+        uint256 outputDepth
+    ) internal pure returns (uint256) {
+        // --- Readable Version ---
+        //// uint256 numerator = _squared(inputAmount) * outputDepth;
+        //// uint256 denominator = _squared(inputAmount + inputDepth);
+        //// return numerator / denominator;
+
+        // --- Gas efficient version ---
+        return
+            (_squared(inputAmount) * outputDepth) /
+            (_squared(inputAmount + inputDepth));
+    }
+
+    ////// TODO: Decide whether this is needed externally and if so, very carefully permission it
+    function _sync() internal {
+        _asset1Depth = IERC20(asset1Addr).balanceOf(address(this));
+        _asset2Depth = IERC20(asset2Addr).balanceOf(address(this));
     }
 }

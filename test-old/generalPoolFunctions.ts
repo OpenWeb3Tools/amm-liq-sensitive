@@ -1,16 +1,17 @@
 import { formatUnits, parseEther } from "ethers/lib/utils";
 import { artifacts, contract } from "hardhat";
-import { assert, expect } from "chai";
+import { assert, expect  } from "chai";
 import {
   BN,
   constants,
   expectEvent,
-  expectRevert,
   time,
 } from "@openzeppelin/test-helpers";
 const { ethers } = require("hardhat");
 var BigNumber = require("bignumber.js");
 const _ = require("./utils.js");
+const truffleAssert = require('truffle-assertions');
+
 
 const Sparta = artifacts.require("./Sparta.sol");
 const Handler = artifacts.require("./Handler.sol");
@@ -41,10 +42,11 @@ contract(
     // SET UP CONTRACT FILES
 
     before(async () => {
-      // Deploy Factory
-      spFactory = await PoolFactory.new(Depp, { from: Depp });
+      
       // Deploy Wrapped BNB
       WBNB = await WrappedBNB.new();
+      // Deploy Factory
+      spFactory = await PoolFactory.new(WBNB.address, { from: Depp });
       // Deploy mockSparta token
       oldSparta = await MockBEP20.new(
         "Sparta",
@@ -57,7 +59,7 @@ contract(
       // Deploy HANDLER
       spHandler = await Handler.new(SP.address);
       // Deploy TOOLS
-      spTools = await Tools.new();
+      spTools = await Tools.new(SP.address);
       // Deploy RESERVE
       spReserve = await Reserve.new(SP.address);
       // Deploy mock BEP20s
@@ -134,12 +136,7 @@ async function deploySparta() {
     expect(String(await SP.maxSupply())).to.equal(
       parseEther("300000000").toString()
     );
-    expect(String(await SP.emissionCurve())).to.equal("2048");
-    expect(await SP.emitting()).to.equal(false);
     expect(await SP.handlerAddr()).to.equal(spHandler.address);
-    expect(String(await SP.getDailyEmission())).to.equal(
-      parseEther("0").toString()
-    );
   });
 }
 
@@ -156,25 +153,61 @@ async function upgradeSparta(acc) {
 }
 
 async function createPool(acc) {
-  it("should create a pool", async function () {
-    let inputA = parseEther("100");
-    let inputB = parseEther("110");
-    var initialLength = _.getBN(await spFactory.allPoolsLength());
+  it("should create a pool", async () => {
+    let inputA = String(parseEther("102"));
+    let inputB = String(parseEther("111"));
+    var initialLength = _.getBN(await spFactory.poolCount());
+    
     var _pool = await spFactory.createPool.call(
       inputA,
       inputB,
       tokenA.address,
       tokenB.address
-    );
+    ,{from:acc});
+    
+    let initUsrBalTokenA = _.getBN(await tokenA.balanceOf(acc));
+    let initUsrBalTokenB = _.getBN(await tokenB.balanceOf(acc));
+
+   
     await spFactory.createPool(inputA, inputB, tokenA.address, tokenB.address, {
       from: acc,
     });
     var poolAddress = await Pool.at(_pool);
+
+
     let values = [tokenA.address, tokenB.address];
     let [token0, token1] = values.sort((a, b) => (a > b ? 1 : -1));
     expect(await poolAddress.asset1Addr()).to.equal(token0);
     expect(await poolAddress.asset2Addr()).to.equal(token1);
-    const newLength = await spFactory.allPoolsLength();
+    const newLength = await spFactory.poolCount();
+    let endUsrBalTokenA = _.getBN(await tokenA.balanceOf(acc));
+    let endUsrBalTokenB = _.getBN(await tokenB.balanceOf(acc));
+    let endPoolBalTokenA = _.getBN(await tokenA.balanceOf(poolAddress.address));
+    let endPoolBalTokenB = _.getBN(await tokenB.balanceOf(poolAddress.address));
+
+    const  {0:endPoolAssetDepthA,1:endPoolAssetDepthB,2: _blockTimestampLast} = await poolAddress.getReserves();
     assert.equal(String(newLength), _.BN2Str(initialLength.plus(1)));
+    assert.equal(_.BN2Str(endUsrBalTokenA), _.BN2Str(initUsrBalTokenA.minus(inputA)));
+    assert.equal(_.BN2Str(endUsrBalTokenB), _.BN2Str(initUsrBalTokenB.minus(inputB)));
+    assert.equal(_.BN2Str(endPoolBalTokenA), _.BN2Str(inputA));
+    assert.equal(_.BN2Str(endPoolBalTokenB), _.BN2Str(inputB));
+    assert.equal(_.BN2Str(endPoolAssetDepthA), _.BN2Str(_.getBN(inputB)));
+    assert.equal(_.BN2Str(endPoolAssetDepthB), _.BN2Str(_.getBN(inputA)));
+    
+    await truffleAssert.reverts(spFactory.createPool(inputA, inputB, tokenB.address, tokenB.address, {
+      from: acc,
+    }), "SpartanProtocolPool: IDENTICAL_ADDRESSES");
+    
+    await truffleAssert.reverts(spFactory.createPool(inputB, inputB,  "0x0000000000000000000000000000000000000000", WBNB.address, {
+      from: acc,
+    }), "SpartanProtocol : NICE TRY");
+
+    await truffleAssert.reverts(spFactory.createPool(inputB, inputB,  tokenB.address, tokenA.address, {
+      from: acc,
+    }), "SpartanProtocalPool: POOL_EXISTS");
+    
   });
+
+
+
 }
