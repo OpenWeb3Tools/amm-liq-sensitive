@@ -1,13 +1,7 @@
 {
-  "name": "spartan-protocol",
+  "name": "amm-liq-sensitive",
   "description": "A permissionless AMM using a liquidity-sensitive slip-base fee model",
-  "version": "3.0.0",
-  "homepage": "https://spartanprotocol.org/",
-  "repository": "github:spartan-protocol/spartan-contracts",
-  "author": "Spartan Protocol Community",
-  "bugs": {
-    "url": "https://github.com/spartan-protocol/spartan-contracts/issues"
-  },
+  "version": "1.0.0",
   "scripts": {
     "compile": "npx hardhat compile",
     "test": "npx hardhat test",

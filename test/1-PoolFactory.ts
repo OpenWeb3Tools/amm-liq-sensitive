@@ -144,9 +144,9 @@ describe("🏭 Pool Factory Contract", function () {
     });
 
     it("User & burn address should receive the correct share of initial LP units", async function () {
-      const { addr1, protocolToken, stablePoolAsAddr1, nativePoolAsAddr1 } =
+      const { addr1, poolFactory, stablePoolAsAddr1, nativePoolAsAddr1 } =
         await loadFixture(createPoolsFixture);
-      const burnAddr = protocolToken.target;
+      const burnAddr = poolFactory.target;
 
       // Get user balances after txn
       const addr1StableLpBal = await getTokenBal(stablePoolAsAddr1, addr1);

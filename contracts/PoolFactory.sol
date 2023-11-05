@@ -8,7 +8,6 @@ import "./Pool.sol";
 
 contract PoolFactory {
     address public immutable wrapAddr; // Address of wrapped version of the chain's native coin
-    address public immutable protocolTokenAddr; // Address of the protocol's token. For deriving contract addresses and also to send the burned LPs to
     uint256 public poolCount;
 
     // TODO: Consider whether we need to translate address(0) into wrapAddr ...
@@ -23,9 +22,8 @@ contract PoolFactory {
         address poolAddr
     );
 
-    constructor(address newWrapAddr, address newProtocolTokenAddr) {
+    constructor(address newWrapAddr) {
         wrapAddr = newWrapAddr;
-        protocolTokenAddr = newProtocolTokenAddr;
     }
 
     function createPool(
@@ -64,9 +62,7 @@ contract PoolFactory {
         );
         string memory _name = string(abi.encodePacked(poolFront, "-SP-Pool"));
         string memory _symbol = string(abi.encodePacked(poolFront, "-SPP"));
-        newPoolAddr = address(
-            new Pool(_name, _symbol, protocolTokenAddr, token1Addr, token2Addr)
-        );
+        newPoolAddr = address(new Pool(_name, _symbol, token1Addr, token2Addr));
 
         /////////////// ALTERNATIVE DEPLOY METHOD - Create2()
         // address newPoolAddr;

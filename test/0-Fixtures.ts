@@ -5,7 +5,6 @@ import {
   usdcAddr,
   connectToContract,
   oneMillion,
-  spartaAddr,
   usdtAddr,
 } from "./utils/utils";
 import {
@@ -27,7 +26,7 @@ const {
   loadFixture,
 } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
-BigNumber.config({ EXPONENTIAL_AT: 1e+9 });
+BigNumber.config({ EXPONENTIAL_AT: 1e9 });
 
 export const deployFixture = async () => {
   /* Contracts are deployed using the first signer/account (ie. 'owner') by default */
@@ -77,37 +76,14 @@ export const deployFixture = async () => {
   });
 
   /* Deploy Contracts */
-  const protocolToken = await hre.ethers.deployContract("Sparta", [spartaAddr]);
-  await protocolToken.waitForDeployment();
   const poolFactory = await hre.ethers.deployContract("PoolFactory", [
     wrapAddr,
-    protocolToken.target,
   ]);
   await poolFactory.waitForDeployment();
   const testHelpers = await hre.ethers.deployContract("TestHelpers", [
     wrapAddr,
   ]);
   await testHelpers.waitForDeployment();
-  const tools = await hre.ethers.deployContract("Tools", [
-    protocolToken.target,
-  ]);
-  await tools.waitForDeployment();
-  const reserve = await hre.ethers.deployContract("Reserve", [
-    protocolToken.target,
-  ]);
-  await reserve.waitForDeployment();
-  const handler = await hre.ethers.deployContract("Handler", [
-    protocolToken.target,
-  ]);
-  await handler.waitForDeployment();
-
-  /* Set Genesis Addresses */
-  await handler.setGenesisAddresses(
-    tools.target,
-    reserve.target,
-    poolFactory.target
-  );
-  await protocolToken.changeHandler(handler.target);
 
   /* Get token contract objects */
   const usdcAsAddr1 = await connectToContract("ERC20", usdcAddr, addr1); // Get usdc contract object with addr1 signer
@@ -138,7 +114,6 @@ export const deployFixture = async () => {
     usdcAsAddr2,
     usdtAsAddr2,
     btcbAsAddr2,
-    protocolToken,
   };
 };
 
@@ -155,7 +130,6 @@ export const createPoolsFixture = async () => {
     usdcAsAddr2,
     usdtAsAddr2,
     btcbAsAddr2,
-    protocolToken,
   } = await loadFixture(deployFixture);
 
   /* Deploy Contracts */
@@ -223,7 +197,6 @@ export const createPoolsFixture = async () => {
     btcbAsAddr2,
     stablePoolAddr,
     nativePoolAddr,
-    protocolToken,
     stablePoolAsAddr1,
     nativePoolAsAddr1,
     stablePoolAsAddr2,

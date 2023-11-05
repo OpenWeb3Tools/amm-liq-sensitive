@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
 // Interfaces
-import "./interfaces/iHandler.sol"; // TODO: Remove this *if we remove iTools*
-import "./interfaces/iSPARTA.sol";
-import "./interfaces/iTools.sol"; // TODO: Consider moving this inside pool contract if we want it immutable
 // Libraries | Contracts
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -23,7 +20,6 @@ contract Pool is ERC20, ReentrancyGuard {
 
     // Constants
     address public immutable factoryAddr;
-    address public immutable protocolTokenAddr; // TODO: Remove this *if we remove iTools* (but keep in mind we need a burn address still)
     address public immutable asset1Addr;
     address public immutable asset2Addr;
     uint256 public immutable genesis;
@@ -54,23 +50,16 @@ contract Pool is ERC20, ReentrancyGuard {
     constructor(
         string memory name_,
         string memory symbol_,
-        address newProtocolTokenAddr, // TODO: Remove this *if we remove iTools*
         address newToken1Addr,
         address newToken2Addr
     ) ERC20(name_, symbol_) {
         factoryAddr = msg.sender;
-        protocolTokenAddr = newProtocolTokenAddr;
         asset1Addr = newToken1Addr;
         asset2Addr = newToken2Addr;
         genesis = block.timestamp;
     }
 
     // Read Functions
-    function _Handler() internal view returns (iHandler) {
-        // TODO: Remove this function *if we remove iTools*
-        return iSPARTA(protocolTokenAddr).handlerAddr(); // Get the Handler address reported by the protocol token's contract
-    }
-
     function getReserves()
         public
         view
@@ -78,6 +67,88 @@ contract Pool is ERC20, ReentrancyGuard {
     {
         asset1Depth = _asset1Depth;
         asset2Depth = _asset2Depth;
+    }
+
+    function calcLiquidityUnits(
+        uint256 token1Input,
+        uint256 token1Depth,
+        uint256 token2Input,
+        uint256 token2Depth,
+        uint256 totalSupply
+    ) public pure returns (uint256 liquidityUnits) {
+        // units = ((P (t B + T b))/(2 T B)) * slipAdjustment
+        // P * (part1 + part2) / (part3) * slipAdjustment
+        uint256 slipAdjustment = getSlipAdjustment(
+            token1Input,
+            token1Depth,
+            token2Input,
+            token2Depth
+        );
+        require(slipAdjustment > (0.98 ether), "!Asym"); // Resist asym-adds
+        uint256 part1 = token1Input * token2Depth;
+        uint256 part2 = token2Input * token1Depth;
+        uint256 part3 = token2Depth * token1Depth * 2;
+        require(part3 > 0, "!DivBy0");
+        uint256 units = (totalSupply * (part1 + part2)) / (part3);
+        return (units * slipAdjustment) / 1 ether;
+    }
+
+    // TODO: Trying an adjusted calcUnits without need for slip adjustment hopefully
+    // TODO: This needs major testing, just an incomplete placehodler for now
+    function calcLiquidityUnitsNewTest(
+        uint256 token1Input,
+        uint256 token1Depth,
+        uint256 token2Input,
+        uint256 token2Depth,
+        uint256 totalSupply
+    ) public pure returns (uint256 liquidityUnits) {
+        // numer = tB + Tb + 2tb
+        // denom = tB + Tb + 2TB
+        // units = P * (numer / denom)
+
+        // Make division last (solidity woes) adapts to:
+        // units = (P * numer) / denom
+
+        // --- Readable Version ---
+        //// uint256 part1 = (token1Input * token2Depth) + (token2Input * token1Depth);
+        //// uint256 part2 = 2 * token1Input * token2Input;
+        //// uint256 denom = part1 + (2 * token1Depth * token2Depth);
+        //// require(denom > 0, "!DivBy0");
+        //// return (totalSupply * (part1 + part2)) / denom;
+
+        // --- Gas Efficient Version ---
+        uint256 part1 = (token1Input * token2Depth) +
+            (token2Input * token1Depth);
+        uint256 denom = part1 + (2 * token1Depth * token2Depth);
+        require(denom > 0, "!DivBy0");
+        return
+            (totalSupply * (part1 + (2 * token1Input * token2Input))) / denom;
+    }
+
+    function getSlipAdjustment(
+        uint256 token1Input,
+        uint256 token1Depth,
+        uint256 token2Input,
+        uint256 token2Depth
+    ) public pure returns (uint256 slipAdjustment) {
+        // slipAdjustment = (1 - ABS((B t - b T)/((2 b + B) (t + T))))
+        uint256 numPart1 = token1Depth * token2Input;
+        uint256 numPart2 = token2Depth * token1Input;
+        uint256 numerator = numPart1 > numPart2
+            ? numPart1 - numPart2
+            : numPart2 - numPart1;
+
+        // --- Readable Denominator Version ---
+        //// uint256 denomPart1 = 2 * token1Input + token1Depth;
+        //// uint256 denomPart2 = token2Input + token2Depth;
+        //// uint256 denominator = denomPart1 * denomPart2;
+
+        // --- Gas Efficient Denominator Version ---
+        uint256 denominator = (2 * token1Input + token1Depth) *
+            (token2Input + token2Depth);
+        require(denominator > 0, "!Div0");
+
+        return 1 ether - ((numerator * 1 ether) / denominator);
     }
 
     // Write Functions
@@ -102,10 +173,9 @@ contract Pool is ERC20, ReentrancyGuard {
         if (_totalSupply == 0) {
             uint burnLiq = 1 ether; // Burn/lock portion (0.0001%)
             liquidity = 9999 ether; // Pool creator's portion (99.9999%)
-            _mint(protocolTokenAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
+            _mint(factoryAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
         } else {
-            // TODO: Consider moving the Tools math into this contract if we want it trustless/immutable
-            liquidity = iTools(_Handler().toolsAddr()).calcLiquidityUnits(
+            liquidity = calcLiquidityUnits(
                 inputAsset1,
                 _asset1Depth,
                 inputAsset2,
@@ -140,17 +210,15 @@ contract Pool is ERC20, ReentrancyGuard {
         if (_totalSupply == 0) {
             uint burnLiq = 1 ether; // Burn/lock portion (0.0001%)
             liquidity = 9999 ether; // Pool creator's portion (99.9999%)
-            _mint(protocolTokenAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
+            _mint(factoryAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
         } else {
-            // TODO: Consider moving the Tools math into this contract if we want it trustless/immutable
-            liquidity = iTools(_Handler().toolsAddr())
-                .calcLiquidityUnitsNewTest(
-                    inputAsset1,
-                    _asset1Depth,
-                    inputAsset2,
-                    _asset2Depth,
-                    _totalSupply
-                ); // Calculate liquidity tokens to mint
+            liquidity = calcLiquidityUnitsNewTest(
+                inputAsset1,
+                _asset1Depth,
+                inputAsset2,
+                _asset2Depth,
+                _totalSupply
+            ); // Calculate liquidity tokens to mint
         }
 
         require(liquidity > 0, "LiqAdd too small");
