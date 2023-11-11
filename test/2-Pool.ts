@@ -158,6 +158,26 @@ describe("🏊‍♀️ Pool Contract", function () {
       expect(lpUnitsRecOld1).to.equal(lpUnitsRecNew1);
       // Write-txn symmetrical add
       await stablePoolAsAddr2.addForMemberNewTest(addr2);
+      // #1a do the same add and make sure LP units are the same with same inputs
+      await usdcAsAddr2.transfer(stablePoolAsAddr2.target, oneHundred);
+      await usdtAsAddr2.transfer(stablePoolAsAddr2.target, oneHundred);
+      // StaticCall symmetrical addForMemberNewTest() --- Cache returned LP units
+      const lpUnitsRecNew1a =
+        await stablePoolAsAddr2.addForMemberNewTest.staticCall(addr2);
+      // Ensure the amounts are equal
+      expect(lpUnitsRecNew1a).to.equal(lpUnitsRecNew1);
+      // Write-txn symmetrical add
+      await stablePoolAsAddr2.addForMemberNewTest(addr2);
+      // #1b do it one more time to make sure!
+      await usdcAsAddr2.transfer(stablePoolAsAddr2.target, oneHundred);
+      await usdtAsAddr2.transfer(stablePoolAsAddr2.target, oneHundred);
+      // StaticCall symmetrical addForMemberNewTest() --- Cache returned LP units
+      const lpUnitsRecNew1b =
+        await stablePoolAsAddr2.addForMemberNewTest.staticCall(addr2);
+      // Write-txn symmetrical add
+      await stablePoolAsAddr2.addForMemberNewTest(addr2);
+      // Ensure the amounts are equal
+      expect(lpUnitsRecNew1b).to.equal(lpUnitsRecNew1);
 
       // #2
       // Do some swaps to change asset ratio in pool
