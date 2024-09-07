@@ -22,6 +22,7 @@ contract PoolFactory {
         address poolAddr
     );
 
+    // This assumes that the deployed chain has a wrapped version of its native coin
     constructor(address newWrapAddr) {
         wrapAddr = newWrapAddr;
     }

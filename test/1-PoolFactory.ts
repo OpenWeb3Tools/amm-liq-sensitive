@@ -32,6 +32,20 @@ const {
 
 describe("🏭 Pool Factory Contract", function () {
   describe("createPool() checks", function () {
+    it("Pool deploy should fail if either input is zero", async function () {
+      const { poolFactory, addr1 } = await loadFixture(deployFixture);
+      await expect(
+        poolFactory
+          .connect(addr1)
+          .createPool("0", oneHundred, usdcAddr, zeroAddr)
+      ).to.be.revertedWith("Input1!>100000");
+      await expect(
+        poolFactory
+          .connect(addr1)
+          .createPool(oneHundred, "0", usdcAddr, zeroAddr)
+      ).to.be.revertedWith("Input2!>100000");
+    });
+
     it("Pool deploy should fail if either inputs are !> 100k wei", async function () {
       const { poolFactory, addr1 } = await loadFixture(deployFixture);
       await expect(
