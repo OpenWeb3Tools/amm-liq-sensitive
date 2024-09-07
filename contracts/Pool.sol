@@ -171,8 +171,8 @@ contract Pool is ERC20, ReentrancyGuard {
 
         uint _totalSupply = totalSupply();
         if (_totalSupply == 0) {
-            uint burnLiq = 1 ether; // Burn/lock portion (0.0001%)
-            liquidity = 9999 ether; // Pool creator's portion (99.9999%)
+            uint burnLiq = 1 ether; // Burn/lock portion (0.01%)
+            liquidity = 9999 ether; // Pool creator's portion (99.99%)
             _mint(factoryAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
         } else {
             liquidity = calcLiquidityUnits(
@@ -208,8 +208,8 @@ contract Pool is ERC20, ReentrancyGuard {
 
         uint _totalSupply = totalSupply();
         if (_totalSupply == 0) {
-            uint burnLiq = 1 ether; // Burn/lock portion (0.0001%)
-            liquidity = 9999 ether; // Pool creator's portion (99.9999%)
+            uint burnLiq = 1 ether; // Burn/lock portion (0.01%)
+            liquidity = 9999 ether; // Pool creator's portion (99.99%)
             _mint(factoryAddr, burnLiq); // Perma-lock some tokens to resist empty pool || wei rounding issues
         } else {
             liquidity = calcLiquidityUnitsNewTest(
